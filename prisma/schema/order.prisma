@@ -1,0 +1,47 @@
+model Order {
+  id            String        @id @default(uuid())
+  orderNumber   String        @unique
+  customerName  String
+  customerEmail String?
+  customerPhone String?
+  totalPrice    Float
+  status        OrderStatus   @default(PENDING)
+  userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  items         OrderItem[]
+  activities    Activity[] @relation("OrderActivities")
+  
+  @@index([status])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("order")
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+// Order Item model
+model OrderItem {
+  id            String    @id @default(uuid())
+  orderId       String
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity      Int
+  unitPrice     Float
+  totalPrice    Float
+  createdAt     DateTime  @default(now())
+  
+  @@unique([orderId, productId])
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_item")
+}

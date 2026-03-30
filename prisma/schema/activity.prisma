@@ -1,0 +1,27 @@
+model Activity {
+  id          String        @id @default(uuid())
+  action      String
+  description String
+  entityType  EntityType
+  entityId    String?
+  userId      String?
+  user        User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  orderId     String?       
+  order       Order?        @relation("OrderActivities", fields: [orderId], references: [id], onDelete: SetNull)
+  metadata    Json?         
+  createdAt   DateTime      @default(now())
+  
+  @@index([userId])
+  @@index([entityType])
+  @@index([createdAt])
+  @@index([orderId]) 
+  @@map("activity")
+}
+
+enum EntityType {
+  ORDER
+  PRODUCT
+  CATEGORY
+  RESTOCK
+  USER
+}
