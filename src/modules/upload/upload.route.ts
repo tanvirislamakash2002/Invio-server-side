@@ -1,38 +1,26 @@
 import express, { Router } from "express";
 import auth from "../../middlewares/auth";
+import { uploadController, uploadMiddleware, publicUploadMiddleware } from "./upload.controller";
 import { Role } from "../../../generated/prisma/enums";
-import { uploadController, uploadMiddleware, documentUploadMiddleware } from "./upload.controller";
 
 const router = express.Router();
 
 
-// Protected routes
+// Public route for registration (no auth required)
+router.post(
+    "/avatar/public",
+    publicUploadMiddleware,
+    uploadController.uploadPublicAvatar
+);
+
+// Protected routes for logged-in users
 router.post(
     "/avatar",
-    auth(Role.ADMIN, Role.SELLER, Role.CUSTOMER),
+    auth(Role.ADMIN, Role.MANAGER, Role.STAFF),
     uploadMiddleware,
     uploadController.uploadAvatar
 );
 
-router.post(
-    "/store-logo",
-    auth(Role.SELLER),
-    uploadMiddleware,
-    uploadController.uploadStoreLogo
-);
 
-router.post(
-    "/product-image/:medicineId",
-    auth(Role.SELLER),
-    uploadMiddleware,
-    uploadController.uploadProductImage
-);
-
-router.post(
-    "/document",
-    auth(Role.SELLER),
-    documentUploadMiddleware,
-    uploadController.uploadDocument
-);
 
 export const uploadRouter: Router = router;
