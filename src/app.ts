@@ -7,6 +7,7 @@ import { notFound } from "./middlewares/notFound";
 
 import { uploadRouter } from "./modules/upload/upload.route";
 import { categoryRouter } from "./modules/category/category.route";
+import { productRouter } from "./modules/product/product.route";
 
 const app: Application = express()
 
@@ -22,6 +23,7 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 app.use('/api/v1/upload', uploadRouter);
 
 app.use("/api/v1/categories", categoryRouter);
+app.use("/api/v1/products", productRouter);
 
 app.get("/", (req, res) => {
     res.send("Hello, World!")
