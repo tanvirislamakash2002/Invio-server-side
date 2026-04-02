@@ -1,4 +1,5 @@
-import { Prisma } from "../../../generated/prisma/client";
+
+import { Prisma } from "../../generated/prisma/client";
 import { prisma } from "../../lib/prisma";
 
 export type CreateProductPayload = {

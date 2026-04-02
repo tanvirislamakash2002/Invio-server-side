@@ -1,5 +1,3 @@
-import { betterAuth } from "better-auth";
-import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "./prisma";
 import nodemailer from "nodemailer"
 
@@ -13,49 +11,54 @@ const transporter = nodemailer.createTransport({
     },
 });
 
-export const auth = betterAuth({
-    database: prismaAdapter(prisma, {
-        provider: "sqlite", 
-    }),
-    trustedOrigins: [process.env.APP_URL!],
-    user: {
-        additionalFields: {
-            role: {
-                type: "string",
-                defaultValue: "STAFF",
-                required: false
-            },
-            phone: {
-                type: "string",
-                required: false
-            },
-            address: {
-                type: "string",
-                required: false
-            },
-            isActive: {
-                type: "boolean",
-                defaultValue: true,
-                required: false
-            },
-        }
-    },
-    emailAndPassword: {
-        enabled: true,
-        autoSignIn: true,
-        requireEmailVerification: false
-    },
-    emailVerification: {
-        sendOnSignUp: true,
-        autoSignInAfterVerification: true,
-        sendVerificationEmail: async ({ user, url, token }, request) => {
-            try {
-                const verificationUrl = `${process.env.APP_URL}/verify-email?token=${token}`
-                const info = await transporter.sendMail({
-                    from: '"Invio" <invio.support@gmail.com>',
-                    to: user.email,
-                    subject: "Verify Your Email ✔",
-                    html: `
+// Create auth asynchronously
+async function createAuth() {
+    const { betterAuth } = await import("better-auth");
+    const { prismaAdapter } = await import("better-auth/adapters/prisma");
+
+    return betterAuth({
+        database: prismaAdapter(prisma, {
+            provider: "sqlite",
+        }),
+        trustedOrigins: [process.env.APP_URL!],
+        user: {
+            additionalFields: {
+                role: {
+                    type: "string",
+                    defaultValue: "STAFF",
+                    required: false
+                },
+                phone: {
+                    type: "string",
+                    required: false
+                },
+                address: {
+                    type: "string",
+                    required: false
+                },
+                isActive: {
+                    type: "boolean",
+                    defaultValue: true,
+                    required: false
+                },
+            }
+        },
+        emailAndPassword: {
+            enabled: true,
+            autoSignIn: true,
+            requireEmailVerification: false
+        },
+        emailVerification: {
+            sendOnSignUp: true,
+            autoSignInAfterVerification: true,
+            sendVerificationEmail: async ({ user, url, token }, request) => {
+                try {
+                    const verificationUrl = `${process.env.APP_URL}/verify-email?token=${token}`
+                    const info = await transporter.sendMail({
+                        from: '"Invio" <invio.support@gmail.com>',
+                        to: user.email,
+                        subject: "Verify Your Email ✔",
+                        html: `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -173,22 +176,24 @@ export const auth = betterAuth({
     </table>
 </body>
 </html>`
-                });
-
-                console.log("Message sent:", info.messageId);
-            } catch (error) {
-                console.error(error);
-                throw error
-            }
+                    });
+                    console.log("Message sent:", info.messageId);
+                } catch (error) {
+                    console.error(error);
+                    throw error
+                }
+            },
         },
-    },
-    socialProviders: {
-        google: {
-            prompt: "select_account consent",
-            accessType: "offline",
-            clientId: process.env.GOOGLE_CLIENT_ID as string,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET as string
+        socialProviders: {
+            google: {
+                prompt: "select_account consent",
+                accessType: "offline",
+                clientId: process.env.GOOGLE_CLIENT_ID as string,
+                clientSecret: process.env.GOOGLE_CLIENT_SECRET as string
+            }
         }
-    }
-});
+    });
+}
 
+// Export the async function
+export const auth = createAuth();

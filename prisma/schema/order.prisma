@@ -1,19 +1,22 @@
 model Order {
-  id            String        @id @default(uuid())
-  orderNumber   String        @unique
-  customerName  String
-  customerEmail String?
-  customerPhone String?
-  totalPrice    Float
-  status        OrderStatus   @default(PENDING)
-  userId        String
-  user          User          @relation(fields: [userId], references: [id], onDelete: Restrict)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  
-  items         OrderItem[]
-  activities    Activity[] @relation("OrderActivities")
-  
+  id          String @id @default(uuid())
+  orderNumber String @unique
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict, name: "CustomerOrders")
+
+  totalPrice Float
+  status     OrderStatus @default(PENDING)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items      OrderItem[]
+  activities Activity[]  @relation("OrderActivities")
+
   @@index([status])
   @@index([userId])
   @@index([createdAt])
@@ -30,16 +33,16 @@ enum OrderStatus {
 
 // Order Item model
 model OrderItem {
-  id            String    @id @default(uuid())
-  orderId       String
-  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId     String
-  product       Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
-  quantity      Int
-  unitPrice     Float
-  totalPrice    Float
-  createdAt     DateTime  @default(now())
-  
+  id         String   @id @default(uuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity   Int
+  unitPrice  Float
+  totalPrice Float
+  createdAt  DateTime @default(now())
+
   @@unique([orderId, productId])
   @@index([orderId])
   @@index([productId])

@@ -1,0 +1,12 @@
+model Customer {
+  id     String  @id @default(uuid())
+  name   String
+  email  String? @unique
+  phone  String? @unique
+  orders Order[] @relation("CustomerOrders")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("customer")
+}
