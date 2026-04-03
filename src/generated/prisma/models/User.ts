@@ -9,8 +9,8 @@
  * 🟢 You can import this file directly.
  */
 import type * as runtime from "@prisma/client/runtime/client"
-import type * as $Enums from "../enums"
-import type * as Prisma from "../internal/prismaNamespace"
+import type * as $Enums from "../enums.js"
+import type * as Prisma from "../internal/prismaNamespace.js"
 
 /**
  * Model User
@@ -310,7 +310,7 @@ export type UserScalarWhereWithAggregatesInput = {
 }
 
 export type UserCreateInput = {
-  id: string
+  id?: string
   name: string
   email: string
   emailVerified?: boolean
@@ -328,7 +328,7 @@ export type UserCreateInput = {
 }
 
 export type UserUncheckedCreateInput = {
-  id: string
+  id?: string
   name: string
   email: string
   emailVerified?: boolean
@@ -382,7 +382,7 @@ export type UserUncheckedUpdateInput = {
 }
 
 export type UserCreateManyInput = {
-  id: string
+  id?: string
   name: string
   email: string
   emailVerified?: boolean
@@ -542,7 +542,7 @@ export type UserUpdateOneRequiredWithoutOrdersNestedInput = {
 }
 
 export type UserCreateWithoutActivitiesInput = {
-  id: string
+  id?: string
   name: string
   email: string
   emailVerified?: boolean
@@ -559,7 +559,7 @@ export type UserCreateWithoutActivitiesInput = {
 }
 
 export type UserUncheckedCreateWithoutActivitiesInput = {
-  id: string
+  id?: string
   name: string
   email: string
   emailVerified?: boolean
@@ -626,7 +626,7 @@ export type UserUncheckedUpdateWithoutActivitiesInput = {
 }
 
 export type UserCreateWithoutSessionsInput = {
-  id: string
+  id?: string
   name: string
   email: string
   emailVerified?: boolean
@@ -643,7 +643,7 @@ export type UserCreateWithoutSessionsInput = {
 }
 
 export type UserUncheckedCreateWithoutSessionsInput = {
-  id: string
+  id?: string
   name: string
   email: string
   emailVerified?: boolean
@@ -710,7 +710,7 @@ export type UserUncheckedUpdateWithoutSessionsInput = {
 }
 
 export type UserCreateWithoutAccountsInput = {
-  id: string
+  id?: string
   name: string
   email: string
   emailVerified?: boolean
@@ -727,7 +727,7 @@ export type UserCreateWithoutAccountsInput = {
 }
 
 export type UserUncheckedCreateWithoutAccountsInput = {
-  id: string
+  id?: string
   name: string
   email: string
   emailVerified?: boolean
@@ -794,7 +794,7 @@ export type UserUncheckedUpdateWithoutAccountsInput = {
 }
 
 export type UserCreateWithoutOrdersInput = {
-  id: string
+  id?: string
   name: string
   email: string
   emailVerified?: boolean
@@ -811,7 +811,7 @@ export type UserCreateWithoutOrdersInput = {
 }
 
 export type UserUncheckedCreateWithoutOrdersInput = {
-  id: string
+  id?: string
   name: string
   email: string
   emailVerified?: boolean

@@ -1,17 +1,44 @@
 {
+  // Visit https://aka.ms/tsconfig to read more about this file
   "compilerOptions": {
-    "rootDir": "./src",
     "outDir": "./dist",
-    "module": "commonjs",
+    "module": "ESNext",
     "moduleResolution": "node",
-    "target": "es2022",
+    "target": "ES2023",
+    "types": [],
     "sourceMap": true,
-    "strict": false,
+    "declaration": true,
+    "declarationMap": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "noEmitOnError": false,
-    "allowSyntheticDefaultImports": true
+    "strict": true
+
+    // File Layout
+    // "rootDir": "./src",
+    // Environment Settings
+    // See also https://aka.ms/tsconfig/module
+    // For nodejs:
+    // "lib": ["esnext"],
+    // "types": ["node"],
+    // and npm install -D @types/node
+    // Other Outputs
+    // Stricter Typechecking Options
+    // Style Options
+    // "noImplicitReturns": true,
+    // "noImplicitOverride": true,
+    // "noUnusedLocals": true,
+    // "noUnusedParameters": true,
+    // "noFallthroughCasesInSwitch": true,
+    // "noPropertyAccessFromIndexSignature": true,
+    // Recommended Options
+    // "jsx": "react-jsx",
+    // "verbatimModuleSyntax": true,
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/generated"]
+  // "exclude": ["node_modules", "dist", "generated/prisma"]
 }

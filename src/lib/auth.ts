@@ -1,5 +1,8 @@
+import { betterAuth } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "./prisma";
 import nodemailer from "nodemailer"
+import { bearer } from "better-auth/plugins"; // <--- Import this
 
 const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
@@ -11,54 +14,56 @@ const transporter = nodemailer.createTransport({
     },
 });
 
-// Create auth asynchronously
-async function createAuth() {
-    const { betterAuth } = await import("better-auth");
-    const { prismaAdapter } = await import("better-auth/adapters/prisma");
 
-    return betterAuth({
-        database: prismaAdapter(prisma, {
-            provider: "sqlite",
-        }),
-        trustedOrigins: [process.env.APP_URL!],
-        user: {
-            additionalFields: {
-                role: {
-                    type: "string",
-                    defaultValue: "STAFF",
-                    required: false
-                },
-                phone: {
-                    type: "string",
-                    required: false
-                },
-                address: {
-                    type: "string",
-                    required: false
-                },
-                isActive: {
-                    type: "boolean",
-                    defaultValue: true,
-                    required: false
-                },
+
+export const auth = betterAuth({
+    database: prismaAdapter(prisma, {
+        provider: "postgresql",
+    }),
+    plugins: [
+        bearer(), // <--- Add this here
+    ],
+    baseURL: process.env.BETTER_AUTH_URL,
+    trustedOrigins: [
+        "http://localhost:3000",
+        "https://invio-xi.vercel.app"
+    ],
+    // --- ADD THIS SECTION ---
+    cookie: {
+        name: "better-auth",
+        attributes: {
+            sameSite: "none",
+            secure: true
+        }
+    },
+
+    user: {
+        additionalFields: {
+            role: {
+                type: "string",
+                defaultValue: "STAFF",
+                required: false
+            },
+            phone: {
+                type: "string",
+                required: false
             }
-        },
-        emailAndPassword: {
-            enabled: true,
-            autoSignIn: true,
-            requireEmailVerification: false
-        },
-        emailVerification: {
-            sendOnSignUp: true,
-            autoSignInAfterVerification: true,
-            sendVerificationEmail: async ({ user, url, token }, request) => {
-                try {
-                    const verificationUrl = `${process.env.APP_URL}/verify-email?token=${token}`
-                    const info = await transporter.sendMail({
-                        from: '"Invio" <invio.support@gmail.com>',
-                        to: user.email,
-                        subject: "Verify Your Email ✔",
-                        html: `
+        }
+    },
+    emailAndPassword: {
+        enabled: true,
+    },
+    emailVerification: {
+        sendOnSignUp: false,
+        autoSignInAfterVerification: false,
+        sendVerificationEmail: async ({ user, url, token }, request) => {
+            try {
+                const verificationUrl = `${process.env.APP_URL}/verify-email?token=${token}`
+                const info = await transporter.sendMail({
+                    from: '"Invio" <invio.support@gmail.com>',
+                    to: user.email,
+                    subject: "Verify Your Email ✔",
+                    html: `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -176,24 +181,36 @@ async function createAuth() {
     </table>
 </body>
 </html>`
-                    });
-                    console.log("Message sent:", info.messageId);
-                } catch (error) {
-                    console.error(error);
-                    throw error
-                }
-            },
-        },
-        socialProviders: {
-            google: {
-                prompt: "select_account consent",
-                accessType: "offline",
-                clientId: process.env.GOOGLE_CLIENT_ID as string,
-                clientSecret: process.env.GOOGLE_CLIENT_SECRET as string
-            }
-        }
-    });
-}
+                });
 
-// Export the async function
-export const auth = createAuth();
+                console.log("Message sent:", info.messageId);
+            } catch (error) {
+                console.error(error);
+                throw error
+            }
+        },
+    },
+    socialProviders: {
+        google: {
+            clientId: process.env.GOOGLE_CLIENT_ID as string,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+            accessType: "offline",
+            prompt: "select_account consent",
+        },
+    },
+    session: {
+        cookieCache: {
+            enabled: true,
+            maxAge: 5 * 60, // 5 minutes
+        },
+    },
+    advanced: {
+        cookiePrefix: "none",
+        useSecureCookies: process.env.NODE_ENV === "production",
+        crossSubDomainCookies: {
+            enabled: false,
+        },
+        disableCSRFCheck: true, // Allow requests without Origin header (Postman, mobile apps, etc.)
+    },
+
+});

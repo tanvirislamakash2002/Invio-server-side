@@ -1,5 +1,6 @@
 import express, { Application } from "express";
 import cors from "cors";
+import { toNodeHandler } from "better-auth/node";
 import errorHandler from "./middlewares/globalErrorHandler.js";
 import { notFound } from "./middlewares/notFound.js";
 import { uploadRouter } from "./modules/upload/upload.route.js";
@@ -7,24 +8,45 @@ import { categoryRouter } from "./modules/category/category.route.js";
 import { productRouter } from "./modules/product/product.route.js";
 import { orderRouter } from "./modules/order/order.route.js";
 import { customerRouter } from "./modules/customer/customer.route.js";
+import { auth } from "./lib/auth.js";
 
 const app: Application = express();
 
-app.use(cors({
-    origin: process.env.APP_URL || "http://localhost:3000",
-    credentials: true
-}));
+// Configure CORS to allow both production and Vercel preview deployments
+const allowedOrigins = [
+    process.env.APP_URL || "http://localhost:3000",
+    process.env.PROD_APP_URL, // Production frontend URL
+].filter(Boolean);
+
+app.use(
+    cors({
+        origin: (origin, callback) => {
+            // Allow requests with no origin (mobile apps, Postman, etc.)
+            if (!origin) return callback(null, true);
+
+            // Check if origin is in allowedOrigins or matches Vercel preview pattern
+            const isAllowed =
+                allowedOrigins.includes(origin) ||
+                /^https:\/\/invio-.*\.vercel\.app$/.test(origin) ||  // ← CHANGE to your frontend name
+                /^https:\/\/.*\.vercel\.app$/.test(origin); // Any Vercel deployment
+
+            if (isAllowed) {
+                callback(null, true);
+            } else {
+                callback(new Error(`Origin ${origin} not allowed by CORS`));
+            }
+        },
+        credentials: true,
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
+        exposedHeaders: ["Set-Cookie"],
+    }),
+);
+
 app.use(express.json());
 
-// Setup auth asynchronously
-async function setupAuth() {
-    const auth = await import("./lib/auth.js").then(m => m.auth);
-    const { toNodeHandler } = await import("better-auth/node");
-    app.all("/api/auth/*splat", toNodeHandler(auth));
-}
-
-// Call the setup function
-setupAuth().catch(console.error);
+// register user route 
+app.all('/api/auth/*splat', toNodeHandler(auth));
 
 // Your routes
 app.use('/api/v1/upload', uploadRouter);
