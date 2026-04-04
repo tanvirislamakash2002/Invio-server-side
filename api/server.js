@@ -1281,8 +1281,10 @@ import { Router as Router4 } from "express";
 var restockController = {
   getAll: async (req, res, next) => {
     try {
-      const data = await restockService.getAll();
-      res.json({ success: true, data });
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 20;
+      const result = await restockService.getAll(page, limit);
+      res.json(result);
     } catch (error) {
       next(error);
     }
@@ -1296,7 +1298,7 @@ var restockController = {
         return res.status(400).json({ success: false, message: "Valid quantity is required" });
       }
       const result = await restockService.restock(productId, quantity, userId);
-      res.json({ success: true, message: "Stock updated successfully", data: result });
+      res.status(201).json({ success: true, message: "Stock updated successfully", data: result });
     } catch (error) {
       next(error);
     }
@@ -1314,9 +1316,21 @@ var restockController = {
 
 // src/modules/restock/restock.route.ts
 var router6 = Router4();
-router6.get("/", auth_default(Role.ADMIN, Role.MANAGER), restockController.getAll);
-router6.patch("/:productId/restock", auth_default(Role.ADMIN, Role.MANAGER), restockController.restock);
-router6.delete("/:productId", auth_default(Role.ADMIN, Role.MANAGER), restockController.remove);
+router6.get(
+  "/",
+  auth_default(Role.ADMIN, Role.MANAGER),
+  restockController.getAll
+);
+router6.patch(
+  "/:productId/restock",
+  auth_default(Role.ADMIN, Role.MANAGER),
+  restockController.restock
+);
+router6.delete(
+  "/:productId",
+  auth_default(Role.ADMIN, Role.MANAGER),
+  restockController.remove
+);
 var restockRouter = router6;
 
 // src/modules/activity/activity.route.ts
