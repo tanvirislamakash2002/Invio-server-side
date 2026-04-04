@@ -1,6 +1,8 @@
 import { OrderStatus, Priority, ProductStatus } from "../../generated/prisma/enums";
 import { prisma } from "../../lib/prisma";
+import { activityService } from "../activity/activity.service";
 import { customerService } from "../customer/customer.service";
+import { restockService } from "../restock/restock.service";
 
 // Input types
 interface OrderItemInput {
@@ -31,49 +33,6 @@ interface UpdateOrderInput {
   items?: OrderItemInput[];
   customer?: { name?: string; email?: string; phone?: string };
 }
-
-// Helper function to update restock queue
-const updateRestockQueue = async (productId: string) => {
-  const product = await prisma.product.findUnique({
-    where: { id: productId },
-  });
-  if (!product) return;
-
-  if (product.stockQuantity < product.minStockThreshold) {
-    await prisma.restockQueue.upsert({
-      where: { productId },
-      update: {
-        currentStock: product.stockQuantity,
-        threshold: product.minStockThreshold,
-        priority: product.stockQuantity === 0 ? Priority.HIGH : 
-                 product.stockQuantity < product.minStockThreshold / 2 ? Priority.HIGH : Priority.MEDIUM,
-      },
-      create: {
-        productId,
-        currentStock: product.stockQuantity,
-        threshold: product.minStockThreshold,
-        priority: product.stockQuantity === 0 ? Priority.HIGH : Priority.MEDIUM,
-      },
-    });
-  } else {
-    await prisma.restockQueue.deleteMany({ where: { productId } });
-  }
-};
-
-// Helper to log activity
-// Helper to log activity
-const logActivity = async (action: string, description: string, entityType: any, entityId: string, userId: string, orderId?: string) => {
-  await prisma.activity.create({
-    data: {
-      action,
-      description,
-      entityType,
-      entityId,
-      userId,
-      orderId: orderId || null, // Convert undefined to null
-    },
-  });
-};
 
 export const orderService = {
   getAllOrders: async ({
@@ -155,19 +114,19 @@ export const orderService = {
       const orderItems = [];
       for (const item of items) {
         const product = await prisma.product.findUnique({ where: { id: item.productId } });
-        
+
         if (!product) {
           return { error: `Product not found` };
         }
-        
+
         if (product.status !== ProductStatus.ACTIVE) {
           return { error: `"${product.name}" is currently unavailable.` };
         }
-        
+
         if (item.quantity > product.stockQuantity) {
           return { error: `Only ${product.stockQuantity} items available for "${product.name}"` };
         }
-        
+
         orderItems.push({
           productId: item.productId,
           quantity: item.quantity,
@@ -201,18 +160,18 @@ export const orderService = {
           where: { id: item.productId },
           data: { stockQuantity: { decrement: item.quantity } },
         });
-        await updateRestockQueue(item.productId);
+        await restockService.updateRestockQueue(item.productId);
       }
 
       // Log activity
-      await logActivity(
-        "ORDER_CREATED",
-        `Order #${order.orderNumber} created by ${userId}`,
-        "ORDER",
-        order.id,
-        userId,
-        order.id
-      );
+      await activityService.create({
+        action: "ORDER_CREATED",
+        description: `Order #${order.orderNumber} created`,
+        entityType: "ORDER",
+        entityId: order.id,
+        userId: userId,
+        orderId: order.id,
+      });
 
       return { order };
     } catch (error: any) {
@@ -221,194 +180,197 @@ export const orderService = {
   },
 
   updateOrderStatus: async (orderId: string, status: string, userId: string) => {
-    try {
-      const order = await prisma.order.findUnique({ 
-        where: { id: orderId },
-        include: { items: true }
-      });
-      
-      if (!order) return { error: "Order not found" };
-      
-      if (order.status === OrderStatus.CANCELLED) {
-        return { error: "Cannot update status of cancelled order" };
-      }
-      
-      if (order.status === OrderStatus.DELIVERED && status !== OrderStatus.CANCELLED) {
-        return { error: "Delivered orders cannot be modified" };
-      }
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true }
+    });
 
-      const validStatuses = [OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.CANCELLED];
-      if (!validStatuses.includes(status as OrderStatus)) {
-        return { error: "Invalid status" };
-      }
+    if (!order) return { error: "Order not found" };
 
-      const updatedOrder = await prisma.order.update({
-        where: { id: orderId },
-        data: { status: status as OrderStatus },
-      });
-
-      await logActivity(
-        "ORDER_STATUS_UPDATED",
-        `Order #${order.orderNumber} status changed to ${status}`,
-        "ORDER",
-        orderId,
-        userId,
-        orderId
-      );
-
-      return { order: updatedOrder };
-    } catch (error: any) {
-      return { error: error.message };
+    if (order.status === OrderStatus.CANCELLED) {
+      return { error: "Cannot update status of cancelled order" };
     }
-  },
 
-  cancelOrder: async (orderId: string, userId: string) => {
-    try {
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        include: { items: true },
+    if (order.status === OrderStatus.DELIVERED && status !== OrderStatus.CANCELLED) {
+      return { error: "Delivered orders cannot be modified" };
+    }
+
+    const validStatuses = [OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.CANCELLED];
+    if (!validStatuses.includes(status as OrderStatus)) {
+      return { error: "Invalid status" };
+    }
+
+    const updatedOrder = await prisma.order.update({
+      where: { id: orderId },
+      data: { status: status as OrderStatus },
+    });
+
+    // FIXED: Should be ORDER_STATUS_UPDATED, not ORDER_CREATED
+    await activityService.create({
+      action: "ORDER_STATUS_UPDATED",
+      description: `Order #${order.orderNumber} status changed to ${status}`,
+      entityType: "ORDER",
+      entityId: order.id,
+      userId: userId,
+      orderId: order.id,
+    });
+
+    return { order: updatedOrder };
+  } catch (error: any) {
+    return { error: error.message };
+  }
+},
+
+cancelOrder: async (orderId: string, userId: string) => {
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    if (!order) return { error: "Order not found" };
+
+    if (order.status === OrderStatus.CANCELLED) {
+      return { error: "Order is already cancelled" };
+    }
+
+    if (order.status === OrderStatus.DELIVERED) {
+      return { error: "Delivered orders cannot be cancelled" };
+    }
+
+    // Restore stock
+    for (const item of order.items) {
+      await prisma.product.update({
+        where: { id: item.productId },
+        data: { stockQuantity: { increment: item.quantity } },
       });
-      
-      if (!order) return { error: "Order not found" };
-      
-      if (order.status === OrderStatus.CANCELLED) {
-        return { error: "Order is already cancelled" };
-      }
-      
-      if (order.status === OrderStatus.DELIVERED) {
-        return { error: "Delivered orders cannot be cancelled" };
+      await restockService.updateRestockQueue(item.productId);
+    }
+
+    const cancelledOrder = await prisma.order.update({
+      where: { id: orderId },
+      data: { status: OrderStatus.CANCELLED },
+    });
+
+    // FIXED: Should be ORDER_CANCELLED, not ORDER_CREATED
+    await activityService.create({
+      action: "ORDER_CANCELLED",
+      description: `Order #${order.orderNumber} cancelled`,
+      entityType: "ORDER",
+      entityId: order.id,
+      userId: userId,
+      orderId: order.id,
+    });
+
+    return { order: cancelledOrder };
+  } catch (error: any) {
+    return { error: error.message };
+  }
+},
+
+updateOrder: async (orderId: string, { status, items, customer }: UpdateOrderInput) => {
+  try {
+    const existingOrder = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true }
+    });
+
+    if (!existingOrder) return { error: "Order not found" };
+
+    if (existingOrder.status === OrderStatus.DELIVERED) {
+      return { error: "Delivered orders cannot be updated" };
+    }
+
+    if (existingOrder.status === OrderStatus.CANCELLED) {
+      return { error: "Cancelled orders cannot be updated" };
+    }
+
+    // Update customer info
+    if (customer) {
+      await prisma.customer.update({
+        where: { id: existingOrder.customerId },
+        data: customer
+      });
+    }
+
+    let totalPrice = existingOrder.totalPrice;
+
+    // Update items if provided
+    if (items) {
+      // Check for duplicate products
+      const productIds = items.map(i => i.productId);
+      const hasDuplicates = productIds.length !== new Set(productIds).size;
+      if (hasDuplicates) {
+        return { error: "Duplicate products are not allowed in the same order" };
       }
 
-      // Restore stock
-      for (const item of order.items) {
+      // Restore previous stock
+      for (const item of existingOrder.items) {
         await prisma.product.update({
           where: { id: item.productId },
-          data: { stockQuantity: { increment: item.quantity } },
+          data: { stockQuantity: { increment: item.quantity } }
         });
-        await updateRestockQueue(item.productId);
+        await restockService.updateRestockQueue(item.productId);
       }
 
-      const cancelledOrder = await prisma.order.update({
-        where: { id: orderId },
-        data: { status: OrderStatus.CANCELLED },
-      });
+      // Validate new items and calculate totalPrice
+      const newOrderItems = [];
+      for (const item of items) {
+        const product = await prisma.product.findUnique({ where: { id: item.productId } });
+        if (!product) return { error: `Product not found` };
+        if (product.status !== ProductStatus.ACTIVE) return { error: `${product.name} is not available` };
+        if (item.quantity > product.stockQuantity) return { error: `Only ${product.stockQuantity} items available for ${product.name}` };
 
-      await logActivity(
-        "ORDER_CANCELLED",
-        `Order #${order.orderNumber} cancelled`,
-        "ORDER",
-        orderId,
-        userId,
-        orderId
-      );
-
-      return { order: cancelledOrder };
-    } catch (error: any) {
-      return { error: error.message };
-    }
-  },
-
-  updateOrder: async (orderId: string, { status, items, customer }: UpdateOrderInput) => {
-    try {
-      const existingOrder = await prisma.order.findUnique({
-        where: { id: orderId },
-        include: { items: true }
-      });
-      
-      if (!existingOrder) return { error: "Order not found" };
-      
-      if (existingOrder.status === OrderStatus.DELIVERED) {
-        return { error: "Delivered orders cannot be updated" };
-      }
-      
-      if (existingOrder.status === OrderStatus.CANCELLED) {
-        return { error: "Cancelled orders cannot be updated" };
-      }
-
-      // Update customer info
-      if (customer) {
-        await prisma.customer.update({ 
-          where: { id: existingOrder.customerId }, 
-          data: customer 
+        newOrderItems.push({
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: product.price,
+          totalPrice: product.price * item.quantity,
         });
       }
 
-      let totalPrice = existingOrder.totalPrice;
+      totalPrice = newOrderItems.reduce((sum, i) => sum + i.totalPrice, 0);
 
-      // Update items if provided
-      if (items) {
-        // Check for duplicate products
-        const productIds = items.map(i => i.productId);
-        const hasDuplicates = productIds.length !== new Set(productIds).size;
-        if (hasDuplicates) {
-          return { error: "Duplicate products are not allowed in the same order" };
-        }
+      // Delete old items and add new items
+      await prisma.orderItem.deleteMany({ where: { orderId } });
+      await prisma.orderItem.createMany({ data: newOrderItems.map(i => ({ ...i, orderId })) });
 
-        // Restore previous stock
-        for (const item of existingOrder.items) {
-          await prisma.product.update({
-            where: { id: item.productId },
-            data: { stockQuantity: { increment: item.quantity } }
-          });
-          await updateRestockQueue(item.productId);
-        }
-
-        // Validate new items and calculate totalPrice
-        const newOrderItems = [];
-        for (const item of items) {
-          const product = await prisma.product.findUnique({ where: { id: item.productId } });
-          if (!product) return { error: `Product not found` };
-          if (product.status !== ProductStatus.ACTIVE) return { error: `${product.name} is not available` };
-          if (item.quantity > product.stockQuantity) return { error: `Only ${product.stockQuantity} items available for ${product.name}` };
-          
-          newOrderItems.push({
-            productId: item.productId,
-            quantity: item.quantity,
-            unitPrice: product.price,
-            totalPrice: product.price * item.quantity,
-          });
-        }
-
-        totalPrice = newOrderItems.reduce((sum, i) => sum + i.totalPrice, 0);
-
-        // Delete old items and add new items
-        await prisma.orderItem.deleteMany({ where: { orderId } });
-        await prisma.orderItem.createMany({ data: newOrderItems.map(i => ({ ...i, orderId })) });
-
-        // Deduct stock for new items
-        for (const item of newOrderItems) {
-          await prisma.product.update({
-            where: { id: item.productId },
-            data: { stockQuantity: { decrement: item.quantity } }
-          });
-          await updateRestockQueue(item.productId);
-        }
+      // Deduct stock for new items
+      for (const item of newOrderItems) {
+        await prisma.product.update({
+          where: { id: item.productId },
+          data: { stockQuantity: { decrement: item.quantity } }
+        });
+        await restockService.updateRestockQueue(item.productId);
       }
-
-      // Update order status and totalPrice
-      const updatedOrder = await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          totalPrice,
-          ...(status !== undefined ? { status: status as OrderStatus } : {}),
-        },
-        include: { items: { include: { product: true } }, customer: true },
-      });
-
-      if (status) {
-        await logActivity(
-          "ORDER_UPDATED",
-          `Order #${existingOrder.orderNumber} updated - status: ${status}`,
-          "ORDER",
-          orderId,
-          existingOrder.userId,
-          orderId
-        );
-      }
-
-      return { order: updatedOrder };
-    } catch (error: any) {
-      return { error: error.message || "Something went wrong" };
     }
+
+    // Update order status and totalPrice
+    const updatedOrder = await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        totalPrice,
+        ...(status !== undefined ? { status: status as OrderStatus } : {}),
+      },
+      include: { items: { include: { product: true } }, customer: true },
+    });
+
+    // FIXED: Only log if status changed, and use correct action
+    if (status) {
+      await activityService.create({
+        action: "ORDER_UPDATED",
+        description: `Order #${existingOrder.orderNumber} updated - status: ${status}`,
+        entityType: "ORDER",
+        entityId: orderId,
+        userId: existingOrder.userId,
+        orderId: orderId,
+      });
+    }
+
+    return { order: updatedOrder };
+  } catch (error: any) {
+    return { error: error.message || "Something went wrong" };
   }
+}
 };

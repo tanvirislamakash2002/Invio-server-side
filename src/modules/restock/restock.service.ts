@@ -1,26 +1,44 @@
 import { prisma } from "../../lib/prisma";
 import { Priority, ProductStatus } from "../../generated/prisma/enums";
+import { activityService } from "../activity/activity.service";
 
 export const restockService = {
-  getAll: async () => {
-    const queue = await prisma.restockQueue.findMany({
+  getAll: async (page: number = 1, limit: number = 20) => {
+  const skip = (page - 1) * limit;
+  
+  const [queue, total] = await Promise.all([
+    prisma.restockQueue.findMany({
+      skip,
+      take: limit,
       orderBy: [
-        { priority: "asc" }, // HIGH first
-        { currentStock: "asc" }, // Lowest stock first
+        { priority: "asc" },
+        { currentStock: "asc" },
       ],
       include: {
         product: {
           include: { category: true },
         },
       },
-    });
+    }),
+    prisma.restockQueue.count(),
+  ]);
 
-    // Add priority label for frontend
-    return queue.map(item => ({
-      ...item,
-      priorityLabel: item.priority === Priority.HIGH ? "High" : item.priority === Priority.MEDIUM ? "Medium" : "Low",
-    }));
-  },
+  const data = queue.map(item => ({
+    ...item,
+    priorityLabel: item.priority === Priority.HIGH ? "High" : item.priority === Priority.MEDIUM ? "Medium" : "Low",
+  }));
+
+  return {
+    success: true,
+    data,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    },
+  };
+},
 
   restock: async (productId: string, quantity: number, userId: string) => {
     const product = await prisma.product.findUnique({
@@ -61,15 +79,13 @@ export const restockService = {
     }
 
     // Log activity
-    await prisma.activity.create({
-      data: {
-        action: "STOCK_UPDATED",
-        description: `Stock updated for "${product.name}" (+${quantity}), now ${newStock} units`,
-        entityType: "PRODUCT",
-        entityId: productId,
-        userId,
-      },
-    });
+    await activityService.create({
+  action: "STOCK_UPDATED",
+  description: `Stock updated for "${product.name}" (+${quantity}), now ${newStock} units`,
+  entityType: "PRODUCT",
+  entityId: productId,
+  userId: userId,
+});
 
     return updatedProduct;
   },
@@ -86,5 +102,31 @@ export const restockService = {
     await prisma.restockQueue.delete({
       where: { productId },
     });
+  },
+  updateRestockQueue: async (productId: string) => {
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+    });
+    if (!product) return;
+
+    if (product.stockQuantity < product.minStockThreshold) {
+      await prisma.restockQueue.upsert({
+        where: { productId },
+        update: {
+          currentStock: product.stockQuantity,
+          threshold: product.minStockThreshold,
+          priority: product.stockQuantity === 0 ? Priority.HIGH : 
+                   product.stockQuantity < product.minStockThreshold / 2 ? Priority.HIGH : Priority.MEDIUM,
+        },
+        create: {
+          productId,
+          currentStock: product.stockQuantity,
+          threshold: product.minStockThreshold,
+          priority: product.stockQuantity === 0 ? Priority.HIGH : Priority.MEDIUM,
+        },
+      });
+    } else {
+      await prisma.restockQueue.deleteMany({ where: { productId } });
+    }
   },
 };
