@@ -1,9 +1,12 @@
 import {
+  OrderStatus,
+  Priority,
+  ProductStatus,
   Role,
   auth,
   prisma,
   prismaNamespace_exports
-} from "./chunk-4WUPPBPU.js";
+} from "./chunk-ECWGCTXZ.js";
 
 // src/app.ts
 import express4 from "express";
@@ -69,7 +72,7 @@ import express from "express";
 var betterAuth;
 var loadAuth = async () => {
   if (!betterAuth) {
-    const authModule = await import("./auth-XJDXJWNE.js");
+    const authModule = await import("./auth-5NT4F7TQ.js");
     betterAuth = await authModule.auth;
   }
   return betterAuth;
@@ -383,11 +386,40 @@ import express3 from "express";
 
 // src/modules/product/product.service.ts
 var productService = {
-  getAll: async () => {
-    return await prisma.product.findMany({
-      orderBy: { createdAt: "desc" },
-      include: { category: true }
-    });
+  getAll: async (params) => {
+    const { page, limit, skip, search, categoryId, status } = params;
+    const where = {};
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } }
+      ];
+    }
+    if (categoryId) {
+      where.categoryId = categoryId;
+    }
+    if (status) {
+      where.status = status;
+    }
+    const [data, total] = await Promise.all([
+      prisma.product.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        include: { category: true }
+      }),
+      prisma.product.count({ where })
+    ]);
+    return {
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPage: Math.ceil(total / limit)
+      }
+    };
   },
   getById: async (id) => {
     return await prisma.product.findUnique({
@@ -396,20 +428,95 @@ var productService = {
     });
   },
   create: async (data) => {
-    return await prisma.product.create({
-      data
+    const status = data.stockQuantity === 0 ? ProductStatus.OUT_OF_STOCK : ProductStatus.ACTIVE;
+    const createData = {
+      name: data.name,
+      categoryId: data.categoryId,
+      price: data.price,
+      stockQuantity: data.stockQuantity,
+      minStockThreshold: data.minStockThreshold,
+      status
+    };
+    if (data.description !== void 0 && data.description !== null) {
+      createData.description = data.description;
+    }
+    const product = await prisma.product.create({
+      data: createData,
+      include: { category: true }
     });
+    if (product.stockQuantity < product.minStockThreshold) {
+      await prisma.restockQueue.upsert({
+        where: { productId: product.id },
+        update: {
+          currentStock: product.stockQuantity,
+          threshold: product.minStockThreshold,
+          priority: product.stockQuantity === 0 ? Priority.HIGH : Priority.MEDIUM
+        },
+        create: {
+          productId: product.id,
+          currentStock: product.stockQuantity,
+          threshold: product.minStockThreshold,
+          priority: product.stockQuantity === 0 ? Priority.HIGH : Priority.MEDIUM
+        }
+      });
+    }
+    return product;
   },
   update: async (id, data) => {
-    return await prisma.product.update({
+    const currentProduct = await prisma.product.findUnique({ where: { id } });
+    if (!currentProduct) throw new Error("Product not found");
+    const newStockQuantity = data.stockQuantity !== void 0 ? data.stockQuantity : currentProduct.stockQuantity;
+    const newStatus = newStockQuantity === 0 ? ProductStatus.OUT_OF_STOCK : ProductStatus.ACTIVE;
+    const updateData = {
+      status: newStatus
+    };
+    if (data.name !== void 0) updateData.name = data.name;
+    if (data.description !== void 0) updateData.description = data.description || null;
+    if (data.categoryId !== void 0) updateData.categoryId = data.categoryId;
+    if (data.price !== void 0) updateData.price = data.price;
+    if (data.stockQuantity !== void 0) updateData.stockQuantity = data.stockQuantity;
+    if (data.minStockThreshold !== void 0) updateData.minStockThreshold = data.minStockThreshold;
+    const product = await prisma.product.update({
       where: { id },
-      data
+      data: updateData,
+      include: { category: true }
     });
+    if (product.stockQuantity < product.minStockThreshold) {
+      await prisma.restockQueue.upsert({
+        where: { productId: product.id },
+        update: {
+          currentStock: product.stockQuantity,
+          threshold: product.minStockThreshold,
+          priority: product.stockQuantity === 0 ? Priority.HIGH : product.stockQuantity < product.minStockThreshold / 2 ? Priority.HIGH : Priority.MEDIUM
+        },
+        create: {
+          productId: product.id,
+          currentStock: product.stockQuantity,
+          threshold: product.minStockThreshold,
+          priority: product.stockQuantity === 0 ? Priority.HIGH : Priority.MEDIUM
+        }
+      });
+    } else {
+      await prisma.restockQueue.deleteMany({ where: { productId: product.id } });
+    }
+    return product;
   },
   delete: async (id) => {
-    return await prisma.product.delete({
-      where: { id }
+    const orderItems = await prisma.orderItem.findFirst({
+      where: { productId: id }
     });
+    if (orderItems) {
+      throw new Error("Cannot delete product with existing orders");
+    }
+    await prisma.restockQueue.deleteMany({ where: { productId: id } });
+    return await prisma.product.delete({ where: { id } });
+  },
+  checkActive: async (id) => {
+    const product = await prisma.product.findUnique({
+      where: { id },
+      select: { status: true, stockQuantity: true }
+    });
+    return product?.status === ProductStatus.ACTIVE && (product?.stockQuantity || 0) > 0;
   }
 };
 
@@ -417,8 +524,19 @@ var productService = {
 var productController = {
   getAll: async (req, res, next) => {
     try {
-      const data = await productService.getAll();
-      res.json({ success: true, data });
+      const { page, limit, search, categoryId, status } = req.query;
+      const pageNum = parseInt(page) || 1;
+      const limitNum = parseInt(limit) || 10;
+      const skip = (pageNum - 1) * limitNum;
+      const result = await productService.getAll({
+        page: pageNum,
+        limit: limitNum,
+        skip,
+        search,
+        categoryId,
+        status
+      });
+      res.json({ success: true, ...result });
     } catch (error) {
       next(error);
     }
@@ -492,6 +610,64 @@ var productRouter = router3;
 // src/modules/order/order.route.ts
 import { Router as Router2 } from "express";
 
+// src/modules/activity/activity.service.ts
+var activityService = {
+  getRecent: async (limit = 10) => {
+    return await prisma.activity.findMany({
+      take: limit,
+      orderBy: { createdAt: "desc" },
+      include: {
+        user: { select: { name: true, email: true } },
+        order: { select: { orderNumber: true } }
+      }
+    });
+  },
+  getAll: async ({ page, limit, skip, sortBy, sortOrder, entityType, action }) => {
+    const where = {};
+    if (entityType) {
+      where.entityType = entityType;
+    }
+    if (action) {
+      where.action = { contains: action, mode: "insensitive" };
+    }
+    const [activities, total] = await Promise.all([
+      prisma.activity.findMany({
+        where,
+        take: limit,
+        skip,
+        orderBy: { [sortBy]: sortOrder },
+        include: {
+          user: { select: { name: true, email: true } },
+          order: { select: { orderNumber: true } }
+        }
+      }),
+      prisma.activity.count({ where })
+    ]);
+    return {
+      data: activities,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    };
+  },
+  // Helper method to create activity (used by other modules)
+  create: async (data) => {
+    return await prisma.activity.create({
+      data: {
+        action: data.action,
+        description: data.description,
+        entityType: data.entityType,
+        entityId: data.entityId,
+        userId: data.userId,
+        orderId: data.orderId || null
+      }
+    });
+  }
+};
+
 // src/modules/customer/customer.service.ts
 var getAllCustomers = async ({ search, page, limit, skip }) => {
   const andConditions = [];
@@ -559,9 +735,118 @@ var customerService = {
   findOrCreateCustomer
 };
 
+// src/modules/restock/restock.service.ts
+var restockService = {
+  getAll: async (page = 1, limit = 20) => {
+    const skip = (page - 1) * limit;
+    const [queue, total] = await Promise.all([
+      prisma.restockQueue.findMany({
+        skip,
+        take: limit,
+        orderBy: [
+          { priority: "asc" },
+          { currentStock: "asc" }
+        ],
+        include: {
+          product: {
+            include: { category: true }
+          }
+        }
+      }),
+      prisma.restockQueue.count()
+    ]);
+    const data = queue.map((item) => ({
+      ...item,
+      priorityLabel: item.priority === Priority.HIGH ? "High" : item.priority === Priority.MEDIUM ? "Medium" : "Low"
+    }));
+    return {
+      success: true,
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    };
+  },
+  restock: async (productId, quantity, userId) => {
+    const product = await prisma.product.findUnique({
+      where: { id: productId }
+    });
+    if (!product) {
+      throw new Error("Product not found");
+    }
+    const newStock = product.stockQuantity + quantity;
+    const newStatus = newStock === 0 ? ProductStatus.OUT_OF_STOCK : ProductStatus.ACTIVE;
+    const updatedProduct = await prisma.product.update({
+      where: { id: productId },
+      data: {
+        stockQuantity: newStock,
+        status: newStatus
+      }
+    });
+    if (newStock >= product.minStockThreshold) {
+      await prisma.restockQueue.deleteMany({
+        where: { productId }
+      });
+    } else {
+      await prisma.restockQueue.update({
+        where: { productId },
+        data: {
+          currentStock: newStock,
+          priority: newStock === 0 ? Priority.HIGH : newStock < product.minStockThreshold / 2 ? Priority.HIGH : Priority.MEDIUM
+        }
+      });
+    }
+    await activityService.create({
+      action: "STOCK_UPDATED",
+      description: `Stock updated for "${product.name}" (+${quantity}), now ${newStock} units`,
+      entityType: "PRODUCT",
+      entityId: productId,
+      userId
+    });
+    return updatedProduct;
+  },
+  remove: async (productId) => {
+    const queueItem = await prisma.restockQueue.findUnique({
+      where: { productId }
+    });
+    if (!queueItem) {
+      throw new Error("Product not found in restock queue");
+    }
+    await prisma.restockQueue.delete({
+      where: { productId }
+    });
+  },
+  updateRestockQueue: async (productId) => {
+    const product = await prisma.product.findUnique({
+      where: { id: productId }
+    });
+    if (!product) return;
+    if (product.stockQuantity < product.minStockThreshold) {
+      await prisma.restockQueue.upsert({
+        where: { productId },
+        update: {
+          currentStock: product.stockQuantity,
+          threshold: product.minStockThreshold,
+          priority: product.stockQuantity === 0 ? Priority.HIGH : product.stockQuantity < product.minStockThreshold / 2 ? Priority.HIGH : Priority.MEDIUM
+        },
+        create: {
+          productId,
+          currentStock: product.stockQuantity,
+          threshold: product.minStockThreshold,
+          priority: product.stockQuantity === 0 ? Priority.HIGH : Priority.MEDIUM
+        }
+      });
+    } else {
+      await prisma.restockQueue.deleteMany({ where: { productId } });
+    }
+  }
+};
+
 // src/modules/order/order.service.ts
 var orderService = {
-  // Get all orders with filtering
   getAllOrders: async ({
     search,
     status,
@@ -579,7 +864,8 @@ var orderService = {
         OR: [
           { customer: { name: { contains: search, mode: "insensitive" } } },
           { customer: { email: { contains: search, mode: "insensitive" } } },
-          { customer: { phone: { contains: search, mode: "insensitive" } } }
+          { customer: { phone: { contains: search, mode: "insensitive" } } },
+          { orderNumber: { contains: search, mode: "insensitive" } }
         ]
       });
     }
@@ -589,8 +875,8 @@ var orderService = {
     if (startDate || endDate) {
       andConditions.push({
         createdAt: {
-          gte: startDate,
-          lte: endDate
+          ...startDate && { gte: startDate },
+          ...endDate && { lte: endDate }
         }
       });
     }
@@ -600,13 +886,14 @@ var orderService = {
       skip,
       orderBy: { [sortBy]: sortOrder ?? "asc" },
       include: {
-        items: { include: { product: true } },
+        items: { include: { product: { include: { category: true } } } },
         customer: true,
         user: true
       }
     });
     const total = await prisma.order.count({ where: { AND: andConditions } });
     return {
+      success: true,
       data: orders,
       pagination: {
         total,
@@ -616,46 +903,135 @@ var orderService = {
       }
     };
   },
-  // Create a new order
   createOrder: async ({ customer, items, userId }) => {
     try {
+      const productIds = items.map((i) => i.productId);
+      const hasDuplicates = productIds.length !== new Set(productIds).size;
+      if (hasDuplicates) {
+        return { error: "This product is already added to the order." };
+      }
       const customerRecord = await customerService.findOrCreateCustomer(customer);
-      const orderItems = await Promise.all(
-        items.map(async (i) => {
-          const product = await prisma.product.findUnique({ where: { id: i.productId } });
-          if (!product || product.status !== "ACTIVE") {
-            throw new Error(`${product?.name || "Product"} is not available`);
-          }
-          if (i.quantity > product.stockQuantity) {
-            throw new Error(`Only ${product.stockQuantity} items available for ${product.name}`);
-          }
-          return {
-            productId: i.productId,
-            quantity: i.quantity,
-            unitPrice: product.price,
-            totalPrice: product.price * i.quantity
-          };
-        })
-      );
+      const orderItems = [];
+      for (const item of items) {
+        const product = await prisma.product.findUnique({ where: { id: item.productId } });
+        if (!product) {
+          return { error: `Product not found` };
+        }
+        if (product.status !== ProductStatus.ACTIVE) {
+          return { error: `"${product.name}" is currently unavailable.` };
+        }
+        if (item.quantity > product.stockQuantity) {
+          return { error: `Only ${product.stockQuantity} items available for "${product.name}"` };
+        }
+        orderItems.push({
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: product.price,
+          totalPrice: product.price * item.quantity
+        });
+      }
       const totalPrice = orderItems.reduce((sum, i) => sum + i.totalPrice, 0);
+      const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
       const order = await prisma.order.create({
         data: {
-          orderNumber: `ORD-${Date.now()}`,
+          orderNumber,
           customerId: customerRecord.id,
           totalPrice,
           userId,
+          status: OrderStatus.PENDING,
           items: { create: orderItems }
-        }
+        },
+        include: { items: { include: { product: true } }, customer: true }
       });
       for (const item of orderItems) {
         await prisma.product.update({
           where: { id: item.productId },
           data: { stockQuantity: { decrement: item.quantity } }
         });
+        await restockService.updateRestockQueue(item.productId);
       }
+      await activityService.create({
+        action: "ORDER_CREATED",
+        description: `Order #${order.orderNumber} created`,
+        entityType: "ORDER",
+        entityId: order.id,
+        userId,
+        orderId: order.id
+      });
       return { order };
     } catch (error) {
       return { error: error.message || "Something went wrong" };
+    }
+  },
+  updateOrderStatus: async (orderId, status, userId) => {
+    try {
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: { items: true }
+      });
+      if (!order) return { error: "Order not found" };
+      if (order.status === OrderStatus.CANCELLED) {
+        return { error: "Cannot update status of cancelled order" };
+      }
+      if (order.status === OrderStatus.DELIVERED && status !== OrderStatus.CANCELLED) {
+        return { error: "Delivered orders cannot be modified" };
+      }
+      const validStatuses = [OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.CANCELLED];
+      if (!validStatuses.includes(status)) {
+        return { error: "Invalid status" };
+      }
+      const updatedOrder = await prisma.order.update({
+        where: { id: orderId },
+        data: { status }
+      });
+      await activityService.create({
+        action: "ORDER_STATUS_UPDATED",
+        description: `Order #${order.orderNumber} status changed to ${status}`,
+        entityType: "ORDER",
+        entityId: order.id,
+        userId,
+        orderId: order.id
+      });
+      return { order: updatedOrder };
+    } catch (error) {
+      return { error: error.message };
+    }
+  },
+  cancelOrder: async (orderId, userId) => {
+    try {
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: { items: true }
+      });
+      if (!order) return { error: "Order not found" };
+      if (order.status === OrderStatus.CANCELLED) {
+        return { error: "Order is already cancelled" };
+      }
+      if (order.status === OrderStatus.DELIVERED) {
+        return { error: "Delivered orders cannot be cancelled" };
+      }
+      for (const item of order.items) {
+        await prisma.product.update({
+          where: { id: item.productId },
+          data: { stockQuantity: { increment: item.quantity } }
+        });
+        await restockService.updateRestockQueue(item.productId);
+      }
+      const cancelledOrder = await prisma.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.CANCELLED }
+      });
+      await activityService.create({
+        action: "ORDER_CANCELLED",
+        description: `Order #${order.orderNumber} cancelled`,
+        entityType: "ORDER",
+        entityId: order.id,
+        userId,
+        orderId: order.id
+      });
+      return { order: cancelledOrder };
+    } catch (error) {
+      return { error: error.message };
     }
   },
   updateOrder: async (orderId, { status, items, customer }) => {
@@ -664,26 +1040,46 @@ var orderService = {
         where: { id: orderId },
         include: { items: true }
       });
-      if (!existingOrder) throw new Error("Order not found");
+      if (!existingOrder) return { error: "Order not found" };
+      if (existingOrder.status === OrderStatus.DELIVERED) {
+        return { error: "Delivered orders cannot be updated" };
+      }
+      if (existingOrder.status === OrderStatus.CANCELLED) {
+        return { error: "Cancelled orders cannot be updated" };
+      }
       if (customer) {
-        await prisma.customer.update({ where: { id: existingOrder.customerId }, data: customer });
+        await prisma.customer.update({
+          where: { id: existingOrder.customerId },
+          data: customer
+        });
       }
       let totalPrice = existingOrder.totalPrice;
       if (items) {
+        const productIds = items.map((i) => i.productId);
+        const hasDuplicates = productIds.length !== new Set(productIds).size;
+        if (hasDuplicates) {
+          return { error: "Duplicate products are not allowed in the same order" };
+        }
         for (const item of existingOrder.items) {
           await prisma.product.update({
             where: { id: item.productId },
             data: { stockQuantity: { increment: item.quantity } }
           });
+          await restockService.updateRestockQueue(item.productId);
         }
-        const newOrderItems = await Promise.all(
-          items.map(async (i) => {
-            const product = await prisma.product.findUnique({ where: { id: i.productId } });
-            if (!product || product.status !== "ACTIVE") throw new Error(`${product?.name || "Product"} not available`);
-            if (i.quantity > product.stockQuantity) throw new Error(`Only ${product.stockQuantity} items available for ${product.name}`);
-            return { productId: i.productId, quantity: i.quantity, unitPrice: product.price, totalPrice: product.price * i.quantity };
-          })
-        );
+        const newOrderItems = [];
+        for (const item of items) {
+          const product = await prisma.product.findUnique({ where: { id: item.productId } });
+          if (!product) return { error: `Product not found` };
+          if (product.status !== ProductStatus.ACTIVE) return { error: `${product.name} is not available` };
+          if (item.quantity > product.stockQuantity) return { error: `Only ${product.stockQuantity} items available for ${product.name}` };
+          newOrderItems.push({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: product.price,
+            totalPrice: product.price * item.quantity
+          });
+        }
         totalPrice = newOrderItems.reduce((sum, i) => sum + i.totalPrice, 0);
         await prisma.orderItem.deleteMany({ where: { orderId } });
         await prisma.orderItem.createMany({ data: newOrderItems.map((i) => ({ ...i, orderId })) });
@@ -692,15 +1088,27 @@ var orderService = {
             where: { id: item.productId },
             data: { stockQuantity: { decrement: item.quantity } }
           });
+          await restockService.updateRestockQueue(item.productId);
         }
       }
       const updatedOrder = await prisma.order.update({
         where: { id: orderId },
         data: {
           totalPrice,
-          ...status !== void 0 ? { status: { set: status } } : {}
-        }
+          ...status !== void 0 ? { status } : {}
+        },
+        include: { items: { include: { product: true } }, customer: true }
       });
+      if (status) {
+        await activityService.create({
+          action: "ORDER_UPDATED",
+          description: `Order #${existingOrder.orderNumber} updated - status: ${status}`,
+          entityType: "ORDER",
+          entityId: orderId,
+          userId: existingOrder.userId,
+          orderId
+        });
+      }
       return { order: updatedOrder };
     } catch (error) {
       return { error: error.message || "Something went wrong" };
@@ -758,7 +1166,7 @@ var createOrder = async (req, res, next) => {
     }
     const user = req.user;
     if (!user?.id) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: "Unauthorized", user });
     }
     const result = await orderService.createOrder({
       customer,
@@ -786,17 +1194,47 @@ var updateOrder = async (req, res, next) => {
     next(error);
   }
 };
+var updateOrderStatus = async (req, res, next) => {
+  try {
+    const orderId = req.params.id;
+    const { status } = req.body;
+    const user = req.user;
+    if (!user?.id) return res.status(401).json({ error: "Unauthorized" });
+    if (!status) return res.status(400).json({ error: "Status is required" });
+    const result = await orderService.updateOrderStatus(orderId, status, user.id);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.status(200).json({ success: true, data: result.order });
+  } catch (error) {
+    next(error);
+  }
+};
+var cancelOrder = async (req, res, next) => {
+  try {
+    const orderId = req.params.id;
+    const user = req.user;
+    if (!user?.id) return res.status(401).json({ error: "Unauthorized" });
+    const result = await orderService.cancelOrder(orderId, user.id);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.status(200).json({ success: true, message: "Order cancelled", data: result.order });
+  } catch (error) {
+    next(error);
+  }
+};
 var orderController = {
   getOrders,
   createOrder,
-  updateOrder
+  updateOrder,
+  updateOrderStatus,
+  cancelOrder
 };
 
 // src/modules/order/order.route.ts
 var router4 = Router2();
-router4.get("/", orderController.getOrders);
-router4.post("/", orderController.createOrder);
-router4.patch("/:id/status", orderController.updateOrder);
+router4.get("/", auth_default(Role.ADMIN, Role.MANAGER, Role.STAFF), orderController.getOrders);
+router4.post("/", auth_default(Role.ADMIN, Role.MANAGER, Role.STAFF), orderController.createOrder);
+router4.patch("/:id/status", auth_default(Role.ADMIN, Role.MANAGER), orderController.updateOrderStatus);
+router4.patch("/:id", auth_default(Role.ADMIN, Role.MANAGER), orderController.updateOrder);
+router4.delete("/:id/cancel", auth_default(Role.ADMIN, Role.MANAGER), orderController.cancelOrder);
 var orderRouter = router4;
 
 // src/modules/customer/customer.route.ts
@@ -832,9 +1270,94 @@ var createCustomerIfNotExist = async (req, res, next) => {
 
 // src/modules/customer/customer.route.ts
 var router5 = Router3();
-router5.get("/", getCustomers);
-router5.post("/", createCustomerIfNotExist);
+router5.get("/", auth_default(Role.ADMIN, Role.MANAGER, Role.STAFF), getCustomers);
+router5.post("/", auth_default(Role.ADMIN, Role.MANAGER, Role.STAFF), createCustomerIfNotExist);
 var customerRouter = router5;
+
+// src/modules/restock/restock.route.ts
+import { Router as Router4 } from "express";
+
+// src/modules/restock/restock.controller.ts
+var restockController = {
+  getAll: async (req, res, next) => {
+    try {
+      const data = await restockService.getAll();
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+  restock: async (req, res, next) => {
+    try {
+      const { productId } = req.params;
+      const { quantity } = req.body;
+      const userId = req.user?.id;
+      if (!quantity || quantity <= 0) {
+        return res.status(400).json({ success: false, message: "Valid quantity is required" });
+      }
+      const result = await restockService.restock(productId, quantity, userId);
+      res.json({ success: true, message: "Stock updated successfully", data: result });
+    } catch (error) {
+      next(error);
+    }
+  },
+  remove: async (req, res, next) => {
+    try {
+      const { productId } = req.params;
+      await restockService.remove(productId);
+      res.json({ success: true, message: "Product removed from restock queue" });
+    } catch (error) {
+      next(error);
+    }
+  }
+};
+
+// src/modules/restock/restock.route.ts
+var router6 = Router4();
+router6.get("/", auth_default(Role.ADMIN, Role.MANAGER), restockController.getAll);
+router6.patch("/:productId/restock", auth_default(Role.ADMIN, Role.MANAGER), restockController.restock);
+router6.delete("/:productId", auth_default(Role.ADMIN, Role.MANAGER), restockController.remove);
+var restockRouter = router6;
+
+// src/modules/activity/activity.route.ts
+import { Router as Router5 } from "express";
+
+// src/modules/activity/activity.controller.ts
+var activityController = {
+  getRecent: async (req, res, next) => {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit) : 10;
+      const data = await activityService.getRecent(limit);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+  getAll: async (req, res, next) => {
+    try {
+      const { page, limit, skip, sortBy, sortOrder } = paginationSortingHelper_default(req.query);
+      const { entityType, action } = req.query;
+      const result = await activityService.getAll({
+        page,
+        limit,
+        skip,
+        sortBy,
+        sortOrder,
+        entityType,
+        action
+      });
+      res.json({ success: true, ...result });
+    } catch (error) {
+      next(error);
+    }
+  }
+};
+
+// src/modules/activity/activity.route.ts
+var router7 = Router5();
+router7.get("/", auth_default(Role.ADMIN, Role.MANAGER, Role.STAFF), activityController.getRecent);
+router7.get("/all", auth_default(Role.ADMIN, Role.MANAGER), activityController.getAll);
+var activityRouter = router7;
 
 // src/app.ts
 var app = express4();
@@ -867,6 +1390,8 @@ app.use("/api/v1/upload", uploadRouter);
 app.use("/api/v1/categories", categoryRouter);
 app.use("/api/v1/products", productRouter);
 app.use("/api/v1/order", orderRouter);
+app.use("/api/v1/restock", restockRouter);
+app.use("/api/v1/activity", activityRouter);
 app.use("/api/v1/customer", customerRouter);
 app.get("/", (req, res) => {
   res.send("Hello, World!");

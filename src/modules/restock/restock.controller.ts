@@ -4,8 +4,11 @@ import { restockService } from "./restock.service";
 export const restockController = {
   getAll: async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = await restockService.getAll();
-      res.json({ success: true, data });
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+
+      const result = await restockService.getAll(page, limit);
+      res.json(result);
     } catch (error) {
       next(error);
     }
@@ -22,7 +25,7 @@ export const restockController = {
       }
 
       const result = await restockService.restock(productId as string, quantity, userId!);
-      res.json({ success: true, message: "Stock updated successfully", data: result });
+      res.status(201).json({ success: true, message: "Stock updated successfully", data: result });
     } catch (error) {
       next(error);
     }

@@ -5,8 +5,19 @@ import { restockController } from "./restock.controller";
 
 const router = Router();
 
-router.get("/", auth(Role.ADMIN, Role.MANAGER), restockController.getAll);
-router.patch("/:productId/restock", auth(Role.ADMIN, Role.MANAGER), restockController.restock);
-router.delete("/:productId", auth(Role.ADMIN, Role.MANAGER), restockController.remove);
+router.get(
+    "/",
+    auth(Role.ADMIN, Role.MANAGER),
+    restockController.getAll
+);
+router.patch(
+    "/:productId/restock",
+    auth(Role.ADMIN, Role.MANAGER),
+    restockController.restock);
+router.delete(
+    "/:productId",
+    auth(Role.ADMIN, Role.MANAGER),
+    restockController.remove
+);
 
 export const restockRouter = router;
