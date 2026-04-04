@@ -32,11 +32,12 @@ export const auth = betterAuth({
     cookie: {
         name: "better-auth",
         attributes: {
-            sameSite: "none",
-            secure: true
+            // For localhost: use 'lax', for production: use 'none'
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+            // For localhost: false, for production: true
+            secure: process.env.NODE_ENV === "production",
         }
     },
-
     user: {
         additionalFields: {
             role: {
@@ -205,12 +206,12 @@ export const auth = betterAuth({
         },
     },
     advanced: {
-        cookiePrefix: "none",
+        cookiePrefix: "better-auth",
         useSecureCookies: process.env.NODE_ENV === "production",
         crossSubDomainCookies: {
             enabled: false,
         },
-        disableCSRFCheck: true, // Allow requests without Origin header (Postman, mobile apps, etc.)
+        disableCSRFCheck: true,
     },
 
 });

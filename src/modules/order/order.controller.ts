@@ -100,8 +100,44 @@ const updateOrder = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+const updateOrderStatus = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const orderId = req.params.id;
+    const { status } = req.body;
+    const user = req.user as AuthUser | undefined;
+    
+    if (!user?.id) return res.status(401).json({ error: "Unauthorized" });
+    if (!status) return res.status(400).json({ error: "Status is required" });
+
+    const result = await orderService.updateOrderStatus(orderId as string, status, user.id);
+    if (result.error) return res.status(400).json({ error: result.error });
+    
+    res.status(200).json({ success: true, data: result.order });
+  } catch (error: any) {
+    next(error);
+  }
+};
+
+const cancelOrder = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const orderId = req.params.id;
+    const user = req.user as AuthUser | undefined;
+    
+    if (!user?.id) return res.status(401).json({ error: "Unauthorized" });
+
+    const result = await orderService.cancelOrder(orderId as string, user.id);
+    if (result.error) return res.status(400).json({ error: result.error });
+    
+    res.status(200).json({ success: true, message: "Order cancelled", data: result.order });
+  } catch (error: any) {
+    next(error);
+  }
+};
+
 export const orderController = {
   getOrders,
   createOrder,
-  updateOrder
-}
+  updateOrder,
+  updateOrderStatus,
+  cancelOrder
+};

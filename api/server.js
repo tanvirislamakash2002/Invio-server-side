@@ -3,7 +3,7 @@ import {
   auth,
   prisma,
   prismaNamespace_exports
-} from "./chunk-UQGL7V3G.js";
+} from "./chunk-4WUPPBPU.js";
 
 // src/app.ts
 import express4 from "express";
@@ -69,7 +69,7 @@ import express from "express";
 var betterAuth;
 var loadAuth = async () => {
   if (!betterAuth) {
-    const authModule = await import("./auth-HRLQQFFZ.js");
+    const authModule = await import("./auth-XJDXJWNE.js");
     betterAuth = await authModule.auth;
   }
   return betterAuth;
