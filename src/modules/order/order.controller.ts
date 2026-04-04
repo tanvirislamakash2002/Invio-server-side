@@ -62,9 +62,9 @@ const createOrder = async (
 
     // Cast user locally
     const user = req.user as AuthUser | undefined;
-
+console.log('---------------',user);
     if (!user?.id) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: "Unauthorized", user });
     }
 
     const result = await orderService.createOrder({

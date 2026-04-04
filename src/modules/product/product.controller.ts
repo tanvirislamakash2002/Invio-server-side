@@ -3,13 +3,27 @@ import { productService } from "./product.service";
 
 export const productController = {
     getAll: async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            const data = await productService.getAll();
-            res.json({ success: true, data });
-        } catch (error) {
-            next(error);
-        }
-    },
+    try {
+        const { page, limit, search, categoryId, status } = req.query;
+        
+        const pageNum = parseInt(page as string) || 1;
+        const limitNum = parseInt(limit as string) || 10;
+        const skip = (pageNum - 1) * limitNum;
+        
+        const result = await productService.getAll({
+            page: pageNum,
+            limit: limitNum,
+            skip,
+            search: search as string,
+            categoryId: categoryId as string,
+            status: status as string,
+        });
+        
+        res.json({ success: true, ...result });
+    } catch (error) {
+        next(error);
+    }
+},
 
     getById: async (req: Request, res: Response, next: NextFunction) => {
         try {

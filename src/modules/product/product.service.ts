@@ -14,13 +14,60 @@ export type CreateProductPayload = {
 
 export type UpdateProductPayload = Partial<CreateProductPayload>;
 
+interface GetAllProductsParams {
+    page: number;
+    limit: number;
+    skip: number;
+    search?: string;
+    categoryId?: string;
+    status?: string;
+}
+
 export const productService = {
-  getAll: async () => {
-    return await prisma.product.findMany({
-      orderBy: { createdAt: "desc" },
-      include: { category: true },
-    });
-  },
+  getAll: async (params: GetAllProductsParams) => {
+    const { page, limit, skip, search, categoryId, status } = params;
+    
+    const where: any = {};
+    
+    // Add search filter
+    if (search) {
+        where.OR = [
+            { name: { contains: search, mode: "insensitive" } },
+            { description: { contains: search, mode: "insensitive" } },
+        ];
+    }
+    
+    // Add category filter
+    if (categoryId) {
+        where.categoryId = categoryId;
+    }
+    
+    // Add status filter
+    if (status) {
+        where.status = status;
+    }
+    
+    const [data, total] = await Promise.all([
+        prisma.product.findMany({
+            where,
+            skip,
+            take: limit,
+            orderBy: { createdAt: "desc" },
+            include: { category: true },
+        }),
+        prisma.product.count({ where }),
+    ]);
+    
+    return {
+        data,
+        pagination: {
+            total,
+            page,
+            limit,
+            totalPage: Math.ceil(total / limit),
+        },
+    };
+},
 
   getById: async (id: string) => {
     return await prisma.product.findUnique({

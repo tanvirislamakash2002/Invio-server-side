@@ -10,6 +10,7 @@ import { orderRouter } from "./modules/order/order.route.js";
 import { customerRouter } from "./modules/customer/customer.route.js";
 import { auth } from "./lib/auth.js";
 import { restockRouter } from "./modules/restock/restock.route.js";
+import { activityRouter } from "./modules/activity/activity.route.js";
 
 const app: Application = express();
 
@@ -55,6 +56,7 @@ app.use("/api/v1/categories", categoryRouter);
 app.use("/api/v1/products", productRouter);
 app.use("/api/v1/order", orderRouter);
 app.use("/api/v1/restock", restockRouter);
+app.use("/api/v1/activity", activityRouter);
 app.use("/api/v1/customer", customerRouter);
 
 app.get("/", (req, res) => {
